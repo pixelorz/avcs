@@ -1,83 +1,85 @@
 #!/bin/bash
 
-# 修正 Coding 的 DNS 错误
-echo nameserver 114.114.114.114 | sudo tee /etc/resolv.conf
+# 安装 unzip
+wget https://coding.net/u/tprss/p/bluemix-source/git/raw/master/v2/unrar
+chmod +x ./unrar
+sudo mv ./unrar /usr/bin/
 
-# 修正 Coding 的 Ubuntu 源错误
-#echo 'deb http://au.archive.ubuntu.com/ubuntu/ wily main restricted' | sudo tee /etc/apt/sources.list
-#echo 'deb http://au.archive.ubuntu.com/ubuntu/ wily-updates main restricted' | sudo tee -a /etc/apt/sources.list
-#sudo apt-get update
-#sudo apt-get install --only-upgrade apt -y
-#cat << _EOF_ | sudo tee /etc/apt/sources.list
-#deb http://mirrors.163.com/ubuntu/ wily main restricted universe multiverse
-#deb http://mirrors.163.com/ubuntu/ wily-security main restricted universe multiverse
-#deb http://mirrors.163.com/ubuntu/ wily-updates main restricted universe multiverse
-#deb http://mirrors.163.com/ubuntu/ wily-proposed main restricted universe multiverse
-#deb http://mirrors.163.com/ubuntu/ wily-backports main restricted universe multiverse
-#deb-src http://mirrors.163.com/ubuntu/ wily main restricted universe multiverse
-#deb-src http://mirrors.163.com/ubuntu/ wily-security main restricted universe multiverse
-#deb-src http://mirrors.163.com/ubuntu/ wily-updates main restricted universe multiverse
-#deb-src http://mirrors.163.com/ubuntu/ wily-proposed main restricted universe multiverse
-#deb-src http://mirrors.163.com/ubuntu/ wily-backports main restricted universe multiverse
-#_EOF_
-sudo apt-get update
+# 安装 kubectl
+curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.7.2/bin/linux/amd64/kubectl
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
 
-# 安装依赖
-sudo apt-get install docker.io wget fortune cowsay -y 
-
-wget -O cf.deb 'https://coding.net/u/tprss/p/bluemix-source/git/raw/master/cf-cli-installer_6.16.0_x86-64.deb' 
-sudo dpkg -i cf.deb 
-
-cf install-plugin -f https://coding.net/u/tprss/p/bluemix-source/git/raw/master/ibm-containers-linux_x64
-
-wget 'https://coding.net/u/tprss/p/bluemix-source/git/raw/master/Bluemix_CLI_0.4.3_amd64.tar.gz'
-tar -zxf Bluemix_CLI_0.4.3_amd64.tar.gz
+# 安装 Bluemix CLI 及插件
+wget -O Bluemix_CLI.rar 'http://detect-10000037.image.myqcloud.com/5e3d1568-d4be-43ac-9196-3be430b82aec' #0.5.5
+unrar x Bluemix_CLI.rar
 cd Bluemix_CLI
 sudo ./install_bluemix_cli
-cd ..
+bluemix config --usage-stats-collect false
+wget -O container-service-linux-amd64.rar 'http://detect-10000037.image.myqcloud.com/1bc1657f-5979-4c96-9d13-5c1b289c84a5'
+unrar x container-service-linux-amd64.rar
+bx plugin install ./container-service-linux-amd64
 
-# 初始化环境
-org=$(openssl rand -base64 8 | md5sum | head -c8)
-cf login -a https://api.eu-gb.bluemix.net
-bx iam org-create $org
-sleep 3
-cf target -o $org
-bx iam space-create dev
-sleep 3
-cf target -s dev
-cf ic namespace set $(openssl rand -base64 8 | md5sum | head -c8)
-sleep 3
-cf ic init
+# 初始化
+echo -e -n "\n请输入用户名："
+read USERNAME
+echo -n '请输入密码：'
+read -s PASSWD
+echo -e '\n'
+(echo 1;echo 1) | bx login -a https://api.ng.bluemix.net -u $USERNAME -p $PASSWD
+bx cs init
+$(bx cs cluster-config $(bx cs clusters | grep 'normal' | awk '{print $1}') | grep 'export')
+PPW=$(openssl rand -base64 12 | md5sum | head -c12)
+SPW=$(openssl rand -base64 12 | md5sum | head -c12)
 
-# 生成密码
-# passwd=$(openssl rand -base64 8 | md5sum | head -c12)
-
-# 创建镜像
-mkdir ss
-cd ss
-
-cat << _EOF2_ >config.json
-{
-    "server":"0.0.0.0",
-    "server_port":443,
-    "local_address": "127.0.0.1",
-    "local_port":1080,
-    "password":"Kh#p*378V",
-    "timeout":300,
-    "method":"aes-256-cfb",
-    "fast_open": false
-}
-_EOF2_
-
-cat << _EOF_ >Dockerfile
-FROM alpine:latest
-RUN set -ex && apk add --no-cache libsodium py2-pip && pip --no-cache-dir install https://github.com/shadowsocks/shadowsocks/archive/master.zip
-ADD config.json /config.json
-EXPOSE 443
-ENTRYPOINT ["ssserver", "-c", "/config.json"]
+# 创建构建环境
+cat << _EOF_ > build.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: build
+spec:
+  containers:
+  - name: centos
+    image: centos:centos7
+    command: ["sleep"]
+    args: ["1800"]
+    securityContext:
+      privileged: true
+  restartPolicy: Never
 _EOF_
+kubectl create -f build.yaml
+sleep 5
+(echo curl -LOs 'https://coding.net/u/tprss/p/bluemix-source/git/raw/master/v2/build.sh'; echo bash build.sh $USERNAME $PASSWD $PPW $SPW) | kubectl exec -it build /bin/bash
 
-cf ic build -t ss:v1 . 
-
-# 运行容器
-cf ic ip bind $(cf ic ip request | cut -d \" -f 2 | tail -1) $(cf ic run -m 512 --name=ss -p 443 registry.ng.bluemix.net/`cf ic namespace get`/ss:v1 | head -1)
+# 输出信息
+PP=$(kubectl get svc kube -o=custom-columns=Port:.spec.ports\[\*\].nodePort | tail -n1)
+SP=$(kubectl get svc ss -o=custom-columns=Port:.spec.ports\[\*\].nodePort | tail -n1)
+IP=$(kubectl get node -o=custom-columns=Port:.metadata.name | tail -n1)
+wget https://coding.net/u/tprss/p/bluemix-source/git/raw/master/v2/cowsay
+chmod +x cowsay
+cat << _EOF_ > default.cow
+\$the_cow = <<"EOC";
+        \$thoughts   ^__^
+         \$thoughts  (\$eyes)\\\\_______
+            (__)\\       )\\\\/\\\\
+             \$tongue ||----w |
+                ||     ||
+EOC
+_EOF_
+clear
+echo
+./cowsay -f ./default.cow 惊不惊喜，意不意外
+echo 
+echo ' 管理面板地址: ' http://$IP:$PP/$PPW/api/v1/proxy/namespaces/kube-system/services/kubernetes-dashboard/
+echo 
+echo ' SS:'
+echo '  IP: '$IP
+echo '  Port: '$SP
+echo '  Password: '$SPW
+echo '  Method: aes-256-cfb'
+ADDR='ss://'$(echo -n "aes-256-cfb:$SPW@$IP:$SP" | base64)
+echo 
+echo '  快速添加: '$ADDR
+echo '  二维码: http://qr.liantu.com/api.php?text='$ADDR
+echo 
