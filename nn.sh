@@ -38,7 +38,7 @@ cd ..
 
 # 初始化环境
 org=$(openssl rand -base64 8 | md5sum | head -c8)
-cf login -a https://api.ng.bluemix.net
+cf login -a https://api.eu-gb.bluemix.net
 bx iam org-create $org
 sleep 3
 cf target -o $org
