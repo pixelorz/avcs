@@ -1,31 +1,13 @@
-FROM alpine:3.6
+FROM ubuntu:16.04
 
-ENV SERVER_ADDR     0.0.0.0
-ENV SERVER_PORT     443
-ENV PASSWORD        psw
-ENV METHOD          aes-128-ctr
-ENV PROTOCOL        auth_aes128_md5
-ENV PROTOCOLPARAM   32
-ENV OBFS            tls1.2_ticket_auth_compatible
-ENV TIMEOUT         300
-ENV DNS_ADDR        8.8.8.8
-ENV DNS_ADDR_2      8.8.4.4
+RUN apt-get update
+RUN apt-get install -y nodejs git
+RUN git clone https://github.com/ajaxorg/cloud9.git
+RUN cd /cloud9 && npm install
 
-ARG BRANCH=manyuser
-ARG WORK=~
+VOLUME ["/workspace"]
 
+EXPOSE 3131
+CMD ["/cloud9/bin/cloud9.sh", "-l", "0.0.0.0", "-w", "/workspace"]
 
-RUN apk --no-cache add python \
-    libsodium \
-    wget
-
-
-RUN mkdir -p $WORK && \
-    wget -qO- --no-check-certificate https://github.com/ssrbackup/shadowsocksr/archive/$BRANCH.tar.gz | tar -xzf - -C $WORK
-
-
-WORKDIR $WORK/shadowsocksr-$BRANCH/shadowsocks
-
-
-EXPOSE $SERVER_PORT
-CMD python server.py -p $SERVER_PORT -k $PASSWORD -m $METHOD -O $PROTOCOL -o $OBFS -G $PROTOCOLPARAM
+CMD node /cloud9/server.js -p 80 -l 0.0.0.0 -w /workspace -a :
